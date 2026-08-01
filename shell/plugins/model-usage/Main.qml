@@ -25,7 +25,15 @@ Item {
     onReadyChanged: root.scheduleSync()
   }
 
-  property var providers: [claudeProvider, codexProvider]
+  Fireworks {
+    id: fireworksProvider
+    enabled: root.providerEnabled("fireworks")
+    providerSettings: root.settings && root.settings.providers && root.settings.providers.fireworks ? root.settings.providers.fireworks : ({})
+    onLastRefreshedAtMsChanged: root.scheduleSync()
+    onReadyChanged: root.scheduleSync()
+  }
+
+  property var providers: [claudeProvider, codexProvider, fireworksProvider]
 
   // A subscription earns a place in the bar and the panel by being switched on
   // in settings and having actually produced numbers — locally or on a synced
@@ -36,13 +44,11 @@ Item {
     var rev = syncRevision
     var running = syncRunning
     var result = []
-    if (claudeProvider.enabled) {
-      var claude = displayProvider(claudeProvider)
-      if (providerHasData(claude)) result.push(claude)
-    }
-    if (codexProvider.enabled) {
-      var codex = displayProvider(codexProvider)
-      if (providerHasData(codex)) result.push(codex)
+    for (var i = 0; i < providers.length; i++) {
+      var source = providers[i]
+      if (!source.enabled) continue
+      var provider = displayProvider(source)
+      if (providerHasData(provider)) result.push(provider)
     }
     return result
   }
@@ -50,13 +56,14 @@ Item {
   // All-time, not today: a quiet day is not the same as an absent provider.
   function providerHasData(p) {
     return numberValue(p.totalPrompts) > 0 || numberValue(p.totalSessions) > 0
-      || numberValue(p.activeDays) > 0 || Number(p.rateLimitPercent) >= 0
+      || numberValue(p.activeDays) > 0 || numberValue(p.todayTotalTokens) > 0
+      || Number(p.balanceRemaining) >= 0 || Number(p.rateLimitPercent) >= 0
       || Number(p.secondaryRateLimitPercent) >= 0
   }
 
-  property bool refreshing: claudeProvider.refreshing || codexProvider.refreshing || syncRunning
+  property bool refreshing: claudeProvider.refreshing || codexProvider.refreshing || fireworksProvider.refreshing || syncRunning
   property double aggregateUpdatedAtMs: aggregateData && aggregateData.updatedAtMs ? Number(aggregateData.updatedAtMs) : 0
-  property double lastRefreshedAtMs: Math.max(aggregateUpdatedAtMs, claudeProvider.lastRefreshedAtMs || 0, codexProvider.lastRefreshedAtMs || 0)
+  property double lastRefreshedAtMs: Math.max(aggregateUpdatedAtMs, claudeProvider.lastRefreshedAtMs || 0, codexProvider.lastRefreshedAtMs || 0, fireworksProvider.lastRefreshedAtMs || 0)
   property int refreshIntervalSec: Math.max(30, Number(setting("refreshIntervalSec", 900)))
 
   property var syncModeSetting: setting("syncMode", setting("syncEnabled", false))
@@ -155,7 +162,8 @@ Item {
   }
 
   function providerEnabled(id) {
-    if (!settings || !settings.providers || !settings.providers[id]) return id === "claude" || id === "codex"
+    if (!settings || !settings.providers || !settings.providers[id])
+      return id === "claude" || id === "codex" || id === "fireworks"
     return settings.providers[id].enabled !== false
   }
 
@@ -351,6 +359,7 @@ Item {
         providerName: "",
         ready: false,
         hasLocalStats: false,
+        hasPromptStats: false,
         todayPrompts: 0,
         todaySessions: 0,
         todayTotalTokens: 0,
@@ -378,6 +387,7 @@ Item {
         if (stats.providerName && acc.providerName === "") acc.providerName = String(stats.providerName)
         acc.ready = acc.ready || stats.ready === true
         acc.hasLocalStats = acc.hasLocalStats || stats.hasLocalStats !== false
+        acc.hasPromptStats = acc.hasPromptStats || stats.hasPromptStats === true
         acc.todayPrompts += numberValue(stats.todayPrompts)
         acc.todaySessions += numberValue(stats.todaySessions)
         acc.todayTotalTokens += numberValue(stats.todayTotalTokens)
@@ -422,6 +432,7 @@ Item {
         providerName: acc.providerName,
         ready: acc.ready || providerDevices.length > 0,
         hasLocalStats: acc.hasLocalStats,
+        hasPromptStats: acc.hasPromptStats,
         todayPrompts: acc.todayPrompts,
         todaySessions: acc.todaySessions,
         todayTotalTokens: acc.todayTotalTokens,
@@ -452,6 +463,7 @@ Item {
       providerName: provider.providerName,
       ready: provider.ready === true,
       hasLocalStats: provider.hasLocalStats !== false,
+      hasPromptStats: provider.hasPromptStats !== false,
       todayPrompts: numberValue(provider.todayPrompts),
       todaySessions: numberValue(provider.todaySessions),
       todayTotalTokens: numberValue(provider.todayTotalTokens),
@@ -508,6 +520,11 @@ Item {
       secondaryRateLimitLabel: provider.secondaryRateLimitLabel,
       secondaryRateLimitResetAt: provider.secondaryRateLimitResetAt,
       tierLabel: provider.tierLabel,
+      balanceRemaining: provider.balanceRemaining ?? -1,
+      balanceFunded: provider.balanceFunded ?? -1,
+      balanceSpent: provider.balanceSpent ?? -1,
+      balanceCurrency: provider.balanceCurrency || "USD",
+      balanceEstimated: provider.balanceEstimated === true,
 
       todayPrompts: synced ? numberValue(stats.todayPrompts) : provider.todayPrompts,
       todaySessions: synced ? numberValue(stats.todaySessions) : provider.todaySessions,
@@ -519,6 +536,7 @@ Item {
       activeDays: synced ? numberValue(stats.activeDays) : provider.activeDays,
       modelUsage: synced ? (stats.modelUsage || ({})) : provider.modelUsage,
       hasLocalStats: synced ? (stats.hasLocalStats !== false) : provider.hasLocalStats,
+      hasPromptStats: synced ? (stats.hasPromptStats === true) : provider.hasPromptStats,
 
       syncEnabled: synced,
       syncDeviceCount: deviceCount,
@@ -558,6 +576,7 @@ Item {
 
   function modelWordCase(word) {
     if (word === "gpt") return "GPT"
+    if (word === "deepseek") return "DeepSeek"
     return word.charAt(0).toUpperCase() + word.slice(1)
   }
 

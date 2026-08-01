@@ -39,7 +39,10 @@ Panel {
   readonly property var limits: limitWindows(provider)
   readonly property var models: modelRows(provider)
   readonly property var headline: bindingWindow(provider)
-  readonly property bool alarming: !!headline && headline.percent >= 0.9
+  readonly property bool hasBalance: !!provider && Number(provider.balanceRemaining) >= 0
+  readonly property bool balanceAlarming: hasBalance && Number(provider.balanceFunded) > 0
+    && Number(provider.balanceRemaining) / Number(provider.balanceFunded) <= 0.1
+  readonly property bool alarming: (!!headline && headline.percent >= 0.9) || balanceAlarming
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
@@ -56,9 +59,9 @@ Panel {
 
   // ---------------------------------------------------------------- limits
   //
-  // Both providers report the same two shapes: a short rolling session window
-  // and a long weekly one. Everything below normalizes them into one record so
-  // the meters and the hero speak a single language.
+  // Subscription providers report the same two shapes: a short rolling
+  // session window and a long weekly one. Everything below normalizes them
+  // into one record so the meters and the hero speak a single language.
 
   // Claude spells its windows out ("Session (5-hour)"), Codex abbreviates
   // them ("5h window", "30m window"). Both have to land on the same record.
@@ -130,6 +133,20 @@ Panel {
     return Math.max(1, minutes) + "m"
   }
 
+  function currencyPrefix(currency) {
+    var code = String(currency || "USD").toUpperCase()
+    if (code === "USD") return "$"
+    if (code === "EUR") return "€"
+    if (code === "GBP") return "£"
+    return code + " "
+  }
+
+  function formatMoney(value, currency) {
+    var amount = Number(value)
+    if (!isFinite(amount)) amount = 0
+    return currencyPrefix(currency) + amount.toFixed(2)
+  }
+
   // ---------------------------------------------------------------- content
 
   // The plan you pay for, under the name of the tool it pays for. Limits live
@@ -171,7 +188,7 @@ Panel {
     var text = label + " · " + usage.formatTokenCount(Number(day.messageCount || 0)) + " tokens"
     // Prompt and session counts only exist for today, so they ride along here
     // instead of taking a section of their own.
-    if (today && provider)
+    if (today && provider && provider.hasPromptStats !== false)
       text += " · " + Number(provider.todayPrompts || 0) + " prompts · "
         + Number(provider.todaySessions || 0) + " sessions"
     return text
@@ -219,6 +236,16 @@ Panel {
     if (usage.syncStatusText !== "") return usage.syncStatusText
     if (provider && provider.syncEnabled && provider.syncDeviceCount > 0)
       return "Merged from " + provider.syncDeviceCount + " device" + (provider.syncDeviceCount === 1 ? "" : "s")
+    if (root.hasBalance) {
+      var parts = []
+      if (provider.balanceEstimated === true) parts.push("Estimated balance")
+      var refreshedAt = Number(provider.lastRefreshedAtMs || 0)
+      if (refreshedAt > 0) {
+        var ageMs = Math.max(0, root.nowMs - refreshedAt)
+        parts.push(ageMs < 60000 ? "Updated now" : "Updated " + formatDuration(ageMs) + " ago")
+      }
+      return parts.join(" · ")
+    }
     return ""
   }
 
@@ -239,6 +266,7 @@ Panel {
   function iconSourceForProvider(p, surfaceColor) {
     if (!p) return ""
     if (p.providerId === "claude") return Qt.resolvedUrl("assets/claude.svg")
+    if (p.providerId === "fireworks") return Qt.resolvedUrl("assets/fireworks.svg")
     if (p.providerId === "codex")
       return colorLuminance(surfaceColor || Color.background) >= 0.5
         ? Qt.resolvedUrl("assets/codex-light.svg")
@@ -248,7 +276,7 @@ Panel {
 
   // Nothing to report, nothing in the bar: Bar.qml collapses a slot whose item
   // is invisible, so the icon appears the moment the first scan finds usage and
-  // stays away entirely on a machine that has never run either CLI.
+  // stays away entirely on a machine that has no provider usage.
   visible: providers.length > 0
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -373,7 +401,7 @@ Panel {
             visible: root.providers.length === 0
             width: parent.width
             topPadding: Style.space(24)
-            text: "No AI coding subscriptions found.\nClaude Code and Codex show up here once you've used them."
+            text: "No AI coding providers found.\nClaude Code, Codex, and Fireworks show up here once they have usage."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -441,10 +469,76 @@ Panel {
             }
           }
 
-          // ---------- Limits ----------
+          // ---------- Balance / limits ----------
           PanelSeparator {
-            visible: limitsSection.visible
+            visible: balanceSection.visible || limitsSection.visible
             foreground: root.foreground
+          }
+
+          Column {
+            id: balanceSection
+            visible: root.hasBalance
+            width: parent.width
+            spacing: Style.space(10)
+
+            readonly property real funded: root.provider ? Number(root.provider.balanceFunded || 0) : 0
+            readonly property real remaining: root.provider ? Number(root.provider.balanceRemaining || 0) : 0
+            readonly property real ratio: funded > 0 ? root.clamp(remaining / funded, 0, 1) : -1
+            readonly property bool low: ratio >= 0 && ratio <= 0.1
+
+            PanelSectionHeader {
+              width: parent.width
+              text: "BALANCE"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(balanceLabel.implicitHeight, balanceValue.implicitHeight)
+
+              Text {
+                id: balanceLabel
+                text: "Prepaid credits"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: balanceValue
+                text: root.provider
+                  ? root.formatMoney(root.provider.balanceRemaining, root.provider.balanceCurrency)
+                  : ""
+                color: balanceSection.low ? root.urgent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            Meter {
+              visible: balanceSection.ratio >= 0
+              width: parent.width
+              value: balanceSection.ratio
+              alarming: balanceSection.low
+            }
+
+            Text {
+              width: parent.width
+              text: {
+                if (!root.provider || balanceSection.funded <= 0) return ""
+                var spent = root.formatMoney(root.provider.balanceSpent, root.provider.balanceCurrency)
+                var funded = root.formatMoney(root.provider.balanceFunded, root.provider.balanceCurrency)
+                return spent + " spent of " + funded + " funded"
+              }
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
 
           Column {

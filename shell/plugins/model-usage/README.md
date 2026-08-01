@@ -1,6 +1,7 @@
 # Model usage
 
-One bar icon and one panel for every AI coding subscription on the machine.
+One bar icon and one panel for AI coding subscriptions and prepaid accounts on
+the machine.
 `Panel.qml` owns the bar button and the popup; `Main.qml` owns provider
 fan-out and the optional cross-device aggregation; `providers/` holds one
 adapter per subscription.
@@ -13,6 +14,8 @@ adapter per subscription.
   It appears only when more than one provider is enabled.
 - **Limits** — the percentage of each allowance used, a matching meter, and
   the time until the session or weekly window resets.
+- **Balance** — prepaid providers replace limits with remaining credit, a
+  fuel-gauge meter, and funded-versus-spent detail.
 - **Tokens by day** — one row per day for the last week: day, bar, tokens, with today
   bolded at the bottom. Hover today for its prompt and session count.
 - **Tokens by model** — tokens per model with the bar behind each row scaled
@@ -37,6 +40,7 @@ its own the first time a scan finds usage. Drop it with
 |---|---|---|
 | `claude` | Anthropic's OAuth usage endpoint (5-hour session + 7-day weekly) | `~/.claude/projects` scanned by `scripts/claude_usage_scanner.py`, plus `stats-cache.json` and `history.jsonl` |
 | `codex` | `scripts/codex_usage_scanner.py` reading the Codex CLI state | the same scanner |
+| `fireworks` | Estimated prepaid balance from configured funding minus rated account costs | Fireworks billing API, grouped by day and model for the last 30 days |
 
 Claude limits need a signed-in CLI; without credentials the panel says so and
 falls back to local stats only.
@@ -81,12 +85,29 @@ omarchy bar set omarchy.model-usage providers '{
     "credentialsPath": "~/.claude/.credentials.json",
     "projectsPath": "~/.claude/projects"
   },
-  "codex": { "enabled": false }
+  "codex": { "enabled": false },
+  "fireworks": {
+    "enabled": true,
+    "accountId": "",
+    "fundedAmount": 20,
+    "fundedAt": "2026-07-01",
+    "authPath": "~/.fireworks/auth.ini"
+  }
 }' --json
 ```
 
-`enabled` defaults to `true` for both; set it to `false` to hide a
-subscription that is installed. The paths above are the defaults.
+`enabled` defaults to `true` for all three providers; set it to `false` to hide
+one. Fireworks remains self-hidden until its API returns usage or a configured
+balance. It reads `FIREWORKS_API_KEY` and `FIREWORKS_ACCOUNT_ID` first, then
+falls back to `~/.fireworks/auth.ini`, which `firectl set-api-key` creates. When
+one API key can access multiple accounts, set `accountId` explicitly.
+
+Fireworks does not expose its live prepaid ledger through the documented API.
+Set `fundedAmount` to the credits purchased and optionally set `fundedAt` to
+the purchase date. With no date, the scanner uses the account creation time.
+The panel subtracts rated account costs and labels the result as estimated.
+For a later top-up, increase `fundedAmount` by the new credit while keeping the
+original `fundedAt`, so both the funding and spend still cover the same period.
 
 With `syncMode` on, every `*.json` snapshot in `syncDir` is merged, so today,
 the last 7 days, and the all-time totals cover every machine you code on —
@@ -94,5 +115,5 @@ active days are unioned by date rather than summed. Rate limits stay
 per-account and are never merged.
 
 One caveat on "all-time": the Codex scanner only reads native session files
-touched in the last 30 days, so Codex totals and its day count cover that
-window. Claude's cover every transcript still on disk.
+touched in the last 30 days, and Fireworks requests the last 30 days from its
+billing API. Claude's totals cover every transcript still on disk.

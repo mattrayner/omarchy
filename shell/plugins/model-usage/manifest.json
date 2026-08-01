@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "omarchy.model-usage",
   "name": "Model Usage",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Omarchy",
   "license": "MIT",
-  "description": "Claude Code and Codex usage, limits, and pace in a native Omarchy bar panel.",
+  "description": "Claude Code, Codex, and Fireworks usage in a native Omarchy bar panel.",
   "kinds": ["bar-widget"],
   "activation": "on-demand",
   "entryPoints": {
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Model Usage",
-    "description": "One bar icon and one panel: rate-limit meters with pace, today, the last week, and the all-time model breakdown for every subscription.",
+    "description": "One bar icon and one panel: subscription limits or prepaid balance, plus recent tokens and model breakdowns.",
     "category": "AI",
     "aliases": ["model-usage"],
     "allowMultiple": false,
@@ -27,6 +27,13 @@
         },
         "codex": {
           "enabled": true
+        },
+        "fireworks": {
+          "enabled": true,
+          "accountId": "",
+          "fundedAmount": 0,
+          "fundedAt": "",
+          "authPath": "~/.fireworks/auth.ini"
         }
       },
       "refreshIntervalSec": 900,

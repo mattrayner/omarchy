@@ -26,6 +26,7 @@ Item {
     property int todaySessions: 0
     property int todayTotalTokens: 0
     property var todayTokensByModel: ({})
+    property bool hasPromptStats: true
 
     property var recentDays: []
     property int totalPrompts: 0
@@ -34,6 +35,12 @@ Item {
     property var activeDates: []
     property var modelUsage: ({})
     property var dailyActivity: []
+
+    property real balanceRemaining: -1
+    property real balanceFunded: -1
+    property real balanceSpent: -1
+    property string balanceCurrency: "USD"
+    property bool balanceEstimated: false
 
     property string tierLabel: ""
     property string authHelpText: "Run `claude auth login` to restore authoritative usage."
